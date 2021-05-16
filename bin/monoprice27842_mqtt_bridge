@@ -7,7 +7,7 @@ class MQTTBridge
   def initialize(mqtt_uri, matrix, device_id: "monoprice27842", base_topic: "homie")
     @base_topic = "#{base_topic}/#{device_id}"
     @mqtt = MQTT::Client.new(mqtt_uri)
-    @mqtt.set_will("#{@base_topic}/$state", "lost", true)
+    @mqtt.set_will("#{@base_topic}/$state", "lost", retain: true, qos: 1)
     @mqtt.connect
     @matrix = matrix
     matrix.item_updated_proc = method(:item_updated)
@@ -16,12 +16,6 @@ class MQTTBridge
     publish_basic_attributes
 
     Thread.new do
-      # keep reading initial status until there's a bit of a lag
-      matrix.read_messages(wait: false)
-      loop do
-        break if matrix.wait_readable(0.1).nil?
-        matrix.read_messages
-      end
       # then say we're ready
       publish("$state", "ready")
 
@@ -30,7 +24,9 @@ class MQTTBridge
       end
     end
 
-    @mqtt.get do |topic, value|
+    @mqtt.get do |packet|
+      topic = packet.topic
+      value = packet.payload
       topic = topic[(@base_topic.length + 1)..-1]
       puts "got #{value.inspect} at #{topic}"
 
@@ -85,7 +81,7 @@ class MQTTBridge
   end
 
   def publish(topic, value)
-    @mqtt.publish("#{@base_topic}/#{topic}", value, true, 1)
+    @mqtt.publish("#{@base_topic}/#{topic}", value, retain: true, qos: 1)
   end
 
   def publish_attribute(attr, value)
@@ -101,7 +97,7 @@ class MQTTBridge
   end
 
   def publish_basic_attributes
-    publish("$homie", "v4.0.0")
+    publish("$homie", "4.0.0")
     publish("$name", "Monoprice 27842 HDMI Matrix")
     publish("$state", "init")
     publish("$nodes", (

@@ -26,7 +26,7 @@ module Monoprice27842
         Net::Telnet::RFC2217.new("Host" => uri.host, "Port" => uri.port || 23, "baud" => 9600)
       else
         require 'ccutrer-serialport'
-        CCutrer::SerialPort.new(uri.path)
+        CCutrer::SerialPort.new(uri.path, baud: 9600, data_bits: 8, parity: :none, stop_bits: 1)
       end
 
       @inputs = (1..8).map { |id| Input.new(id) }
@@ -41,13 +41,25 @@ module Monoprice27842
       @io.readbyte while @io.ready?
 
       @next_message = ->(m) { @name = m }
-      write_and_wait("/*Name.")
+      write_and_wait("/*Name.", wait: 5)
+      unless @name
+        @next_message = nil
+        turned_on = true
+        write_and_wait("PowerON.")
+        read_messages(lag: 0.1)
+        @next_message = ->(m) { @name = m }
+        write_and_wait("/*Name.")
+      end
       @next_message = ->(m) { @type = m }
       write_and_wait("/*Type.")
       write_and_wait("/^Version.")
-      @io.write("STA.")
+      write('STA.')
       (1..9).each do |i|
-        @io.write("PresetSta%02d." % i)
+        write('PresetSta%02d.' % i)
+      end
+      read_messages(lag: turned_on ? 0.5 : 0.1)
+      if turned_on
+        write_and_wait("PowerOFF.")
       end
     end
       
@@ -57,8 +69,19 @@ module Monoprice27842
       result
     end
 
-    def read_messages(wait: true)
-      return if !wait && !@io.ready?
+    def read_messages(wait: true, lag: nil)
+      if lag
+        # keep reading messages until there's a bit of a lag between
+        read_messages(wait: false)
+        loop do
+          break if wait_readable(lag).nil?
+          read_messages
+        end
+        return
+      end
+
+      return if !wait && @io.ready?
+      return if wait.is_a?(Numeric) && @io.wait_readable(wait).nil?
 
       buffer = ""
       count = 0
@@ -86,63 +109,74 @@ module Monoprice27842
 
     def power=(value)
       raise ArgumentError unless [true, false].include?(value)
-      @io.write("Power#{value ? "ON" : "OFF"}.")
+
+      write("Power#{value ? 'ON' : 'OFF'}.")
     end
 
     def hdbt_poc=(value)
       raise ArgumentError unless [true, false].include?(value)
-      @io.write("PHDBT#{value ? "ON" : "OFF"}.")
+
+      write("PHDBT#{value ? 'ON' : 'OFF'}.")
     end
 
     def front_panel_lock=(value)
       raise ArgumentError unless [true, false].include?(value)
-      @io.write(value ? "Lock." : "Unlock.")
+
+      write(value ? 'Lock.' : 'Unlock.')
     end
 
     def ip=(value)
       raise ArgumentError unless value =~ /^(?:\d{1,3}\.){3}\d{1,3}$/
-      @io.write("SetGuiIP:#{value}.")
+
+      write("SetGuiIP:#{value}.")
     end
 
     def ir_follow_video=(value)
       raise ArgumentError unless [true, false].include?(value)
-      @io.write("IRFV#{value ? "ON" : "OFF"}.")
+
+      write("IRFV#{value ? 'ON' : 'OFF'}.")
     end
 
     def output_power(value, output: 0)
       raise ArgumentError unless [true, false].include?(value)
       raise ArgumentError unless 0 <= output && output <= 16
-      @io.write("%sOUT%02d." % [value ? '@' : '$', output])
+
+      write(format('%sOUT%02d.', value ? '@' : '$', output))
     end
 
     def output_hdcp(value, output: 0)
       raise ArgumentError unless [:match_display, :passive, :bypass].include?(value)
       raise ArgumentError unless 0 <= output && output <= 16
-      @io.write("HDCP%02d%s." % [output, value.to_s[0..2].upcase])
+
+      write(format('HDCP%02d%s.', output, value.to_s[0..2].upcase))
     end
 
     def hdbt_output_input(value, output: 0)
       raise ArgumentError unless 1 <= value && value <= 8
       raise ArgumentError unless 0 <= output && output <= 8
-      @io.write("OUT%02d:%02d." % [output, value])
+
+      write(format('OUT%02d:%02d.', output, value))
     end
 
     def hdbt_output_downscale(value, output: 0)
       raise ArgumentError unless [true, false].include?(value)
       raise ArgumentError unless 0 <= output && output <= 8
-      @io.write("DS%02d%s." % [output, value ? "ON" : "OFF"])
+
+      write(format('DS%02d%s.', output, value ? 'ON' : 'OFF'))
     end
 
     def hdbt_output_rs232_remote_control_mcu(value, output: 0)
       raise ArgumentError unless [true, false].include?(value)
       raise ArgumentError unless 0 <= output && output <= 8
-      @io.write("RS232RCM%02d%s." % [output, value ? "ON" : "OFF"])
+
+      write(format('RS232RCM%02d%s.', output, value ? 'ON' : 'OFF'))
     end
 
     def hdbt_output_ir_remote_control_mcu(value, output: 0)
       raise ArgumentError unless [true, false].include?(value)
       raise ArgumentError unless 0 <= output && output <= 8
-      @io.write("IRRCM%02d%s." % [output, value ? "ON" : "OFF"])
+
+      write(format('IRRCM%02d%s.', output, value ? 'ON' : 'OFF'))
     end
 
     def analog_output_input(value, output: 0)
@@ -150,13 +184,14 @@ module Monoprice27842
       raise ArgumentError unless 0 <= output && output <= 8
       value = $2.to_i
       value += 8 if $1 == 'out'
-      @io.write("ANALOG%02d:%02d." % [output, value])
+      write(format('ANALOG%02d:%02d.', output, value))
     end
 
     def analog_output_mute(value, output: 0)
       raise ArgumentError unless [true, false].include?(value)
       raise ArgumentError unless 0 <= output && output <= 8
-      @io.write("AVOLUME%02d:%s." % [output, value ? "MU" : "UM"])
+
+      write(format('AVOLUME%02d:%s.', output, value ? 'MU' : 'UM'))
     end
 
     def analog_output_volume(value, output: 0)
@@ -167,7 +202,7 @@ module Monoprice27842
       when :down; "V-"
       else; "%02d" % value
       end
-      @io.write("AVOLUME%02d:%s." % [output, value])
+      write(format('AVOLUME%02d:%s.', output, value))
     end
 
     def spdif_output_input(value, output: 0)
@@ -176,30 +211,36 @@ module Monoprice27842
       value = $2.to_i
       value += 8 if $1 == 'out'
       value += 16 if $1 == 'arc'
-      @io.write("SPDIF%02d:%02d." % [output, value])
+      write(format('SPDIF%02d:%02d.', output, value))
     end
 
     def ir_output_input(value, output: 0)
       raise ArgumentError unless 1 <= value && value <= 8
       raise ArgumentError unless 0 <= output && output <= 8
-      @io.write("IR%02d:%02d." % [output, value])
+
+      write(format('IR%02d:%02d.', output, value))
     end
 
     private
 
-    def write_and_wait(message)
+    def write(message)
+      puts "writing #{message.inspect}"
       @io.write(message)
-      read_messages
+    end
+
+    def write_and_wait(message, wait: true)
+      write(message)
+      read_messages(wait: wait)
     end
 
     def got_message(message)
+      puts message.inspect
+
       if @next_message
         @next_message.call(message)
         @next_message = nil
         return
       end
-
-      puts message.inspect
 
       case message
       when "GUI Or RS232 Query Status:"
