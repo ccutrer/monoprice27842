@@ -13,7 +13,7 @@ Gem::Specification.new do |s|
   s.executables = ['monoprice27842_mqtt_bridge']
   s.files = Dir["{bin,lib}/**/*"]
 
-  s.add_dependency 'mqtt-ccutrer', '~> 1.0'
+  s.add_dependency 'homie-mqtt', '~> 1.2'
   s.add_dependency 'net-telnet-rfc2217', '~> 1.0'
   s.add_dependency 'ccutrer-serialport', '~> 1.0'
 
