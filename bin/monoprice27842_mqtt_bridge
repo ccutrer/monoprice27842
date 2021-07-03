@@ -1,73 +1,98 @@
 #!/usr/bin/env ruby
+# frozen_string_literal: true
 
 require 'monoprice27842'
 require 'homie-mqtt'
 
 class MQTTBridge
-  def initialize(mqtt_uri, matrix, device_id: "monoprice27842", base_topic: "homie")
+  def initialize(mqtt_uri, matrix, device_id: 'monoprice27842', base_topic: 'homie')
     @matrix = matrix
     matrix.item_updated_proc = method(:item_updated)
 
     @homie = MQTT::Homie::Device.new(
       device_id,
-      "Monoprice 27842 HDMI Matrix",
+      'Monoprice 27842 HDMI Matrix',
       mqtt: mqtt_uri,
-      root_topic: base_topic)
+      root_topic: base_topic
+    )
 
-    @homie.node("matrix", @matrix.name, @matrix.type) do |m|
-      m.property("power", "System Power", :boolean, @matrix.power) { |v| @matrix.power = v }
-      m.property("hdbt-poc", "HDBT Outputs Power-Over-Cable Enabled", :boolean, @matrix.hdbt_poc) { |v| @matrix.hdbt_poc = v }
-      m.property("front-panel-lock", "Front Panel Buttons Locked", :boolean, @matrix.front_panel_lock) { |v| @matrix.front_panel_lock = v }
-      m.property("ip", "IP Address", :string, @matrix.ip) { |v| next unless v =~ /^(?:\d{1,3}\.){3}\d{1,3}$/; @matrix.ip = v }
-      m.property("ir-follow-video", "IR Switching Follows Video Switching", :boolean, @matrix.ir_follow_video) { |v| @matrix.ir_follow_video = v }
-    end
+    @homie.node('matrix', @matrix.name, @matrix.type) do |m|
+      m.property('power', 'System Power', :boolean, @matrix.power) { |v| @matrix.power = v }
+      m.property('hdbt-poc', 'HDBT Outputs Power-Over-Cable Enabled', :boolean, @matrix.hdbt_poc) do |v|
+        @matrix.hdbt_poc = v
+      end
+      m.property('front-panel-lock', 'Front Panel Buttons Locked', :boolean, @matrix.front_panel_lock) do |v|
+        @matrix.front_panel_lock = v
+      end
+      m.property('ip', 'IP Address', :string, @matrix.ip) do |v|
+        next unless v =~ /^(?:\d{1,3}\.){3}\d{1,3}$/
 
-    @matrix.inputs.each do |i|
-      @homie.node("input#{i.id}", "HDMI Input #{i.id}", "HDMI Input") do |input|
-        input.property("link", "Link Status", :boolean, i.link)
-        input.property("edid", "EDID", :string, i.edid) { |v| i.edid = v }
+        @matrix.ip = v
+      end
+
+      m.property('ir-follow-video', 'IR Switching Follows Video Switching', :boolean, @matrix.ir_follow_video) do |v|
+        @matrix.ir_follow_video = v
       end
     end
 
-    def add_output_properties(homie_node, output)
-      homie_node.property("power", "Output On", :boolean, output.power) { |v| output.power = v }
-      homie_node.property("link", "Link Status", :boolean, output.link)
-      homie_node.property("hdcp", "HDCP Mode", :enum, output.hdcp, format: %w[match-display passive bypass]) { |v| output.hdcp = v.sub('-', '_').to_sym }
+    @matrix.inputs.each do |i|
+      @homie.node("input#{i.id}", "HDMI Input #{i.id}", 'HDMI Input') do |input|
+        input.property('link', 'Link Status', :boolean, i.link)
+        input.property('edid', 'EDID', :string, i.edid) { |v| i.edid = v }
+      end
     end
 
     @matrix.hdbt_outputs.each do |o|
-      @homie.node("hdbt-output#{o.id}", "HDBT Output #{o.id}", "HDBT Output") do |out|
+      @homie.node("hdbt-output#{o.id}", "HDBT Output #{o.id}", 'HDBT Output') do |out|
         add_output_properties(out, o)
-        out.property("input", "Input", :integer, o.input, format: 1..8) { |v| o.input = v }
-        out.property("downscale", "Automatic Video Resolution Downscaling", :boolean, o.downscale) { |v| o.downscale = v }
-        out.property("rs232-remote-control-mcu", "Matrix can be controlled via RS-232 device", :boolean, o.rs232_remote_control_mcu) { |v| o.rs232_remote_control_mcu = v }
-        out.property("ir-remote-control-mcu", "Matrix can be controlled via IR", :boolean, o.ir_remote_control_mcu) { |v| o.ir_remote_control_mcu = v }
+        out.property('input', 'Input', :integer, o.input, format: 1..8) { |v| o.input = v }
+        out.property('downscale', 'Automatic Video Resolution Downscaling', :boolean, o.downscale) do |v|
+          o.downscale = v
+        end
+        out.property('rs232-remote-control-mcu', 'Matrix can be controlled via RS-232 device', :boolean,
+                     o.rs232_remote_control_mcu) do |v|
+          o.rs232_remote_control_mcu = v
+        end
+        out.property('ir-remote-control-mcu', 'Matrix can be controlled via IR', :boolean,
+                     o.ir_remote_control_mcu) do |v|
+          o.ir_remote_control_mcu = v
+        end
       end
     end
 
     @matrix.hdmi_outputs.each do |o|
-      @homie.node("hdmi-output#{o.id}", "HDMI Output #{o.id}", "HDMI Output") do |out|
+      @homie.node("hdmi-output#{o.id}", "HDMI Output #{o.id}", 'HDMI Output') do |out|
         add_output_properties(out, o)
       end
     end
 
     @matrix.analog_outputs.each do |o|
-      @homie.node("analog-output#{o.id}", "Analog Audio Output #{o.id}", "Analog Audio Output") do |out|
-        out.property("input", "Input", :enum, o.input, format: %w[in1 in2 in3 in4 in5 in6 in7 in8 out1 out2 out3 out4 out5 out6 out7 out8]) { |v| o.input = v.to_sym }
-        out.property("mute", "Mute", :boolean, o.mute) { |v| o.mute = v }
-        out.property("volume", "Volume", :integer, o.volume, format: 0..100, unit: "%") { |v| o.volume = v }
+      @homie.node("analog-output#{o.id}", "Analog Audio Output #{o.id}", 'Analog Audio Output') do |out|
+        out.property('input', 'Input', :enum, o.input,
+                     format: %w[in1 in2 in3 in4 in5 in6 in7 in8 out1 out2 out3 out4 out5 out6 out7 out8]) do |v|
+          o.input = v.to_sym
+        end
+        out.property('mute', 'Mute', :boolean, o.mute) { |v| o.mute = v }
+        out.property('volume', 'Volume', :integer, o.volume, format: 0..100, unit: '%') { |v| o.volume = v }
       end
     end
 
     @matrix.spdif_outputs.each do |o|
-      @homie.node("spdif-output#{o.id}", "SPDIF Audio Output #{o.id}", "SPDIF Audio Output") do |out|
-        out.property("input", "Input", :enum, o.input, format: %w[in1 in2 in3 in4 in5 in6 in7 in8 out1 out2 out3 out4 out5 out6 out7 out8 arc1 arc2 arc3 arc4 arc5 arc6 arc7 arc8]) { |v| o.input = v.to_sym }
+      @homie.node("spdif-output#{o.id}", "SPDIF Audio Output #{o.id}", 'SPDIF Audio Output') do |out|
+        out.property('input', 'Input', :enum, o.input,
+                     format: %w[in1 in2 in3 in4 in5 in6 in7 in8
+                                out1 out2 out3 out4 out5 out6 out7 out8
+                                arc1 arc2 arc3 arc4 arc5 arc6 arc7 arc8]) do |v|
+          o.input = v.to_sym
+        end
       end
     end
 
     @matrix.ir_outputs.each do |o|
-      @homie.node("ir-output#{o.id}", "IR Output #{o.id}", "IR Output") do |out|
-        out.property("ir-input", "IR Input (from remote HDBT)", :integer, o.ir_input, format: 1..8) { |v| o.ir_input = v }
+      @homie.node("ir-output#{o.id}", "IR Output #{o.id}", 'IR Output') do |out|
+        out.property('ir-input', 'IR Input (from remote HDBT)', :integer, o.ir_input, format: 1..8) do |v|
+          o.ir_input = v
+        end
       end
     end
 
@@ -78,17 +103,25 @@ class MQTTBridge
     end
   end
 
+  def add_output_properties(homie_node, output)
+    homie_node.property('power', 'Output On', :boolean, output.power) { |v| output.power = v }
+    homie_node.property('link', 'Link Status', :boolean, output.link)
+    homie_node.property('hdcp', 'HDCP Mode', :enum, output.hdcp, format: %w[match-display passive bypass]) do |v|
+      output.hdcp = v.sub('-', '_').to_sym
+    end
+  end
+
   def item_updated(object, attribute)
     node_name = case object
-    when Monoprice27842::Matrix; "matrix"
-    when Monoprice27842::Input; "input#{object.id}"
-    when Monoprice27842::HDBTOutput; "hdbt-output#{object.id}"
-    when Monoprice27842::HDMIOutput; "hdmi-output#{object.id}"
-    when Monoprice27842::AnalogOutput; "analog-output#{object.id}"
-    when Monoprice27842::SPDIFOutput; "spdif-output#{object.id}"
-    when Monoprice27842::IROutput; "ir-output#{object.id}"
-    when Monoprice27842::Preset; return; "preset#{object.id}"
-    end
+                when Monoprice27842::Matrix then 'matrix'
+                when Monoprice27842::Input then "input#{object.id}"
+                when Monoprice27842::HDBTOutput then "hdbt-output#{object.id}"
+                when Monoprice27842::HDMIOutput then "hdmi-output#{object.id}"
+                when Monoprice27842::AnalogOutput then "analog-output#{object.id}"
+                when Monoprice27842::SPDIFOutput then "spdif-output#{object.id}"
+                when Monoprice27842::IROutput then "ir-output#{object.id}"
+                when Monoprice27842::Preset then "preset#{object.id}"
+                end
     node = @homie[node_name]
     property = node[attribute.to_s.gsub('_', '-')]
     property.value = object.send(attribute)
@@ -101,4 +134,4 @@ device_id = ARGV.shift
 
 matrix = Monoprice27842::Matrix.new(matrix_uri)
 
-MQTTBridge.new(mqtt_uri, matrix, device_id: device_id || "monoprice27842")
+MQTTBridge.new(mqtt_uri, matrix, device_id: device_id || 'monoprice27842')

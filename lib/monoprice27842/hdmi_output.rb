@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Monoprice27842
   class HDMIOutput
     attr_reader :id, :power, :link, :hdcp

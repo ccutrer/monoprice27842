@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Monoprice27842
   class IROutput
     # ir_input is FROM HDMI outputs

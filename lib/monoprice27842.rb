@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'monoprice27842/analog_output'
 require 'monoprice27842/hdmi_output'
 require 'monoprice27842/hdbt_output'

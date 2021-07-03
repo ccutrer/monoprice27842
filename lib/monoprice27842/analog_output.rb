@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Monoprice27842
   class AnalogOutput
     attr_reader :id, :input, :mute, :volume

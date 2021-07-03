@@ -1,33 +1,38 @@
+# frozen_string_literal: true
+
 require 'io/wait'
 
 module Monoprice27842
   class Matrix
-    attr_reader :name, :type, :version, :cpld_version, :video_driver_version, :power, :hdbt_poc, :front_panel_lock, :ip, :ir_follow_video
-    attr_reader :inputs, :hdbt_outputs, :hdmi_outputs, :analog_outputs, :spdif_outputs, :ir_outputs, :presets
+    attr_reader :name, :type, :version, :cpld_version, :video_driver_version,
+                :power, :hdbt_poc, :front_panel_lock, :ip, :ir_follow_video,
+                :inputs, :hdbt_outputs, :hdmi_outputs, :analog_outputs,
+                :spdif_outputs, :ir_outputs, :presets
     attr_accessor :item_updated_proc
 
     EDIDS = [
-      "1080p 2CH",
-      "1080p MultiCH",
-      "4K@30Hz HDR 2CH",
-      "4K@30Hz HDR MultiCH",
-      "4K@60Hz HDR 2CH",
-      "4K@60Hz HDR MultiCH",
-      "User-defined"
+      '1080p 2CH',
+      '1080p MultiCH',
+      '4K@30Hz HDR 2CH',
+      '4K@30Hz HDR MultiCH',
+      '4K@60Hz HDR 2CH',
+      '4K@60Hz HDR MultiCH',
+      'User-defined'
     ].freeze
 
     def initialize(uri)
       uri = URI.parse(uri)
-      @io = if uri.scheme == 'tcp'
-        require 'socket'
-        TCPSocket.new(uri.host, uri.port)
-      elsif uri.scheme == 'telnet' || uri.scheme == 'rfc2217'
-        require 'net/telnet/rfc2217'
-        Net::Telnet::RFC2217.new("Host" => uri.host, "Port" => uri.port || 23, "baud" => 9600)
-      else
-        require 'ccutrer-serialport'
-        CCutrer::SerialPort.new(uri.path, baud: 9600, data_bits: 8, parity: :none, stop_bits: 1)
-      end
+      @io = case uri.scheme
+            when 'tcp'
+              require 'socket'
+              TCPSocket.new(uri.host, uri.port)
+            when 'telnet', 'rfc2217'
+              require 'net/telnet/rfc2217'
+              Net::Telnet::RFC2217.new('Host' => uri.host, 'Port' => uri.port || 23, 'baud' => 9600)
+            else
+              require 'ccutrer-serialport'
+              CCutrer::SerialPort.new(uri.path, baud: 9600, data_bits: 8, parity: :none, stop_bits: 1)
+            end
 
       @inputs = (1..8).map { |id| Input.new(id) }
       @hdbt_outputs = (1..8).map { |id| HDBTOutput.new(id, self) }
@@ -36,36 +41,35 @@ module Monoprice27842
       @spdif_outputs = (1..8).map { |id| SPDIFOutput.new(id, self) }
       @ir_outputs = (1..8).map { |id| IROutput.new(id, self) }
       @presets = (1..8).map { |id| Preset.new(id, self) }
-      
+
       # empty any trash recently sent
       @io.readbyte while @io.ready?
 
       @next_message = ->(m) { @name = m }
-      write_and_wait("/*Name.", wait: 5)
+      write_and_wait('/*Name.', wait: 5)
       unless @name
         @next_message = nil
         turned_on = true
-        write_and_wait("PowerON.")
+        write_and_wait('PowerON.')
         read_messages(lag: 0.1)
         @next_message = ->(m) { @name = m }
-        write_and_wait("/*Name.")
+        write_and_wait('/*Name.')
       end
       @next_message = ->(m) { @type = m }
-      write_and_wait("/*Type.")
-      write_and_wait("/^Version.")
+      write_and_wait('/*Type.')
+      write_and_wait('/^Version.')
       write('STA.')
       (1..9).each do |i|
-        write('PresetSta%02d.' % i)
+        write(format('PresetSta%02d.', i))
       end
       read_messages(lag: turned_on ? 0.5 : 0.1)
-      if turned_on
-        write_and_wait("PowerOFF.")
-      end
+      write_and_wait('PowerOFF.') if turned_on
     end
-      
+
     def wait_readable(*args)
       result = @io.wait_readable(*args)
       return self if result == @io
+
       result
     end
 
@@ -75,6 +79,7 @@ module Monoprice27842
         read_messages(wait: false)
         loop do
           break if wait_readable(lag).nil?
+
           read_messages
         end
         return
@@ -83,12 +88,10 @@ module Monoprice27842
       return if !wait && @io.ready?
       return if wait.is_a?(Numeric) && @io.wait_readable(wait).nil?
 
-      buffer = ""
+      buffer = +''
       count = 0
       loop do
-        while @io.ready?
-          buffer.concat(@io.readpartial(65536))
-        end
+        buffer.concat(@io.readpartial(65_536)) while @io.ready?
 
         unless buffer[-1] == "\n"
           @io.wait_readable
@@ -97,10 +100,11 @@ module Monoprice27842
 
         buffer.split("\r\n").each do |message|
           next if message.empty?
+
           got_message(message)
           count += 1
         end
-        buffer = ""
+        buffer = +''
 
         break unless @io.ready?
       end
@@ -139,49 +143,50 @@ module Monoprice27842
 
     def output_power(value, output: 0)
       raise ArgumentError unless [true, false].include?(value)
-      raise ArgumentError unless 0 <= output && output <= 16
+      raise ArgumentError unless (0..16).include?(output)
 
       write(format('%sOUT%02d.', value ? '@' : '$', output))
     end
 
     def output_hdcp(value, output: 0)
-      raise ArgumentError unless [:match_display, :passive, :bypass].include?(value)
-      raise ArgumentError unless 0 <= output && output <= 16
+      raise ArgumentError unless %i[match_display passive bypass].include?(value)
+      raise ArgumentError unless (0..16).include?(output)
 
       write(format('HDCP%02d%s.', output, value.to_s[0..2].upcase))
     end
 
     def hdbt_output_input(value, output: 0)
-      raise ArgumentError unless 1 <= value && value <= 8
-      raise ArgumentError unless 0 <= output && output <= 8
+      raise ArgumentError unless (1..8).include?(value)
+      raise ArgumentError unless (0..8).include?(output)
 
       write(format('OUT%02d:%02d.', output, value))
     end
 
     def hdbt_output_downscale(value, output: 0)
       raise ArgumentError unless [true, false].include?(value)
-      raise ArgumentError unless 0 <= output && output <= 8
+      raise ArgumentError unless (0..8).include?(output)
 
       write(format('DS%02d%s.', output, value ? 'ON' : 'OFF'))
     end
 
     def hdbt_output_rs232_remote_control_mcu(value, output: 0)
       raise ArgumentError unless [true, false].include?(value)
-      raise ArgumentError unless 0 <= output && output <= 8
+      raise ArgumentError unless (0..8).include?(output)
 
       write(format('RS232RCM%02d%s.', output, value ? 'ON' : 'OFF'))
     end
 
     def hdbt_output_ir_remote_control_mcu(value, output: 0)
       raise ArgumentError unless [true, false].include?(value)
-      raise ArgumentError unless 0 <= output && output <= 8
+      raise ArgumentError unless (0..8).include?(output)
 
       write(format('IRRCM%02d%s.', output, value ? 'ON' : 'OFF'))
     end
 
     def analog_output_input(value, output: 0)
       raise ArgumentError unless value.to_s =~ /^(in|out)([1-8])$/
-      raise ArgumentError unless 0 <= output && output <= 8
+      raise ArgumentError unless (0..8).include?(output)
+
       value = $2.to_i
       value += 8 if $1 == 'out'
       write(format('ANALOG%02d:%02d.', output, value))
@@ -189,25 +194,27 @@ module Monoprice27842
 
     def analog_output_mute(value, output: 0)
       raise ArgumentError unless [true, false].include?(value)
-      raise ArgumentError unless 0 <= output && output <= 8
+      raise ArgumentError unless (0..8).include?(output)
 
       write(format('AVOLUME%02d:%s.', output, value ? 'MU' : 'UM'))
     end
 
     def analog_output_volume(value, output: 0)
-      raise ArgumentError unless [:up, :down].include?(value) || (0..100).include?(value)
-      raise ArgumentError unless 0 <= output && output <= 8
+      raise ArgumentError unless %i[up down].include?(value) || (0..100).include?(value)
+      raise ArgumentError unless (0..8).include?(output)
+
       value = case value
-      when :up; "V+"
-      when :down; "V-"
-      else; "%02d" % value
-      end
+              when :up then 'V+'
+              when :down then 'V-'
+              else; format('%02d', value)
+              end
       write(format('AVOLUME%02d:%s.', output, value))
     end
 
     def spdif_output_input(value, output: 0)
       raise ArgumentError unless value.to_s =~ /^(in|out|arc)([1-8])$/
-      raise ArgumentError unless 0 <= output && output <= 8
+      raise ArgumentError unless (0..8).include?(output)
+
       value = $2.to_i
       value += 8 if $1 == 'out'
       value += 16 if $1 == 'arc'
@@ -215,8 +222,8 @@ module Monoprice27842
     end
 
     def ir_output_input(value, output: 0)
-      raise ArgumentError unless 1 <= value && value <= 8
-      raise ArgumentError unless 0 <= output && output <= 8
+      raise ArgumentError unless (1..8).include?(value)
+      raise ArgumentError unless (0..8).include?(output)
 
       write(format('IR%02d:%02d.', output, value))
     end
@@ -224,7 +231,7 @@ module Monoprice27842
     private
 
     def write(message)
-      if self.power == false && message != "PowerON."
+      if power == false && message != 'PowerON.'
         puts "dropping #{message.inspect}"
         return
       end
@@ -247,7 +254,7 @@ module Monoprice27842
       end
 
       case message
-      when "GUI Or RS232 Query Status:"
+      when 'GUI Or RS232 Query Status:'
       when @name
       when @type
       when /^V(\d+\.\d+\.\d+)$/
@@ -316,16 +323,16 @@ module Monoprice27842
         obj = ir_outputs[$1.to_i - 1]
         obj.update_ir_input($2.to_i)
         item_updated_proc&.call(obj, :ir_input)
-      when "IN   1  2  3  4  5  6  7  8"
+      when 'IN   1  2  3  4  5  6  7  8'
       when /^LINK ((?:Y|N)(?:  (?:Y|N)){7})$/
-        $1.split("  ").each_with_index do |link, i|
+        $1.split('  ').each_with_index do |link, i|
           obj = inputs[i - 1]
           obj.update_link(link == 'Y')
           item_updated_proc&.call(obj, :link)
         end
-      when "OUT  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15 16"
+      when 'OUT  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15 16'
       when /^LINK ((?:Y|N)(?:  (?:Y|N)){15})$/
-        $1.split("  ").each_with_index do |link, i|
+        $1.split('  ').each_with_index do |link, i|
           obj = find_hdmi_output(i)
           obj.update_link(link == 'Y')
           item_updated_proc&.call(obj, :link)

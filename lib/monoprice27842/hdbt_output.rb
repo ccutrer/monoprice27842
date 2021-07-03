@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Monoprice27842
   class HDBTOutput < HDMIOutput
     attr_reader :input, :downscale, :rs232_remote_control_mcu, :ir_remote_control_mcu
