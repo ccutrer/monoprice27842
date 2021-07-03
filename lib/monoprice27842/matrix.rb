@@ -224,6 +224,10 @@ module Monoprice27842
     private
 
     def write(message)
+      if self.power == false && message != "PowerON."
+        puts "dropping #{message.inspect}"
+        return
+      end
       puts "writing #{message.inspect}"
       @io.write(message)
     end
