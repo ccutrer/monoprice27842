@@ -41,6 +41,7 @@ module Monoprice27842
       @spdif_outputs = (1..8).map { |id| SPDIFOutput.new(id, self) }
       @ir_outputs = (1..8).map { |id| IROutput.new(id, self) }
       @presets = (1..8).map { |id| Preset.new(id, self) }
+      @mutex = Mutex.new
 
       # empty any trash recently sent
       @io.readbyte while @io.ready?
@@ -73,6 +74,15 @@ module Monoprice27842
       result
     end
 
+    def refresh
+      return unless power
+
+      synchronize do
+        write_and_wait('STA_IN.')
+        write_and_wait('STA_OUT.')
+      end
+    end
+
     def read_messages(wait: true, lag: nil)
       if lag
         # keep reading messages until there's a bit of a lag between
@@ -88,27 +98,29 @@ module Monoprice27842
       return if !wait && @io.ready?
       return if wait.is_a?(Numeric) && @io.wait_readable(wait).nil?
 
-      buffer = +''
-      count = 0
-      loop do
-        buffer.concat(@io.readpartial(65_536)) while @io.ready?
-
-        unless buffer[-1] == "\n"
-          @io.wait_readable
-          next
-        end
-
-        buffer.split("\r\n").each do |message|
-          next if message.empty?
-
-          got_message(message)
-          count += 1
-        end
+      synchronize do
         buffer = +''
+        count = 0
+        loop do
+          buffer.concat(@io.readpartial(65_536)) while @io.ready?
 
-        break unless @io.ready?
+          unless buffer[-1] == "\n"
+            @io.wait_readable
+            next
+          end
+
+          buffer.split("\r\n").each do |message|
+            next if message.empty?
+
+            got_message(message)
+            count += 1
+          end
+          buffer = +''
+
+          break unless @io.ready?
+        end
+        count
       end
-      count
     end
 
     def power=(value)
@@ -231,17 +243,21 @@ module Monoprice27842
     private
 
     def write(message)
-      if power == false && message != 'PowerON.'
-        puts "dropping #{message.inspect}"
-        return
+      synchronize do
+        if power == false && message != 'PowerON.'
+          puts "dropping #{message.inspect}"
+          return
+        end
+        puts "writing #{message.inspect}"
+        @io.write(message)
       end
-      puts "writing #{message.inspect}"
-      @io.write(message)
     end
 
     def write_and_wait(message, wait: true)
-      write(message)
-      read_messages(wait: wait)
+      synchronize do
+        write(message)
+        read_messages(wait: wait)
+      end
     end
 
     def got_message(message)
@@ -365,6 +381,12 @@ module Monoprice27842
       else
         hdbt_outputs[output - 1]
       end
+    end
+
+    def synchronize(&block)
+      return yield if @mutex.owned?
+
+      @mutex.synchronize(&block)
     end
   end
 end

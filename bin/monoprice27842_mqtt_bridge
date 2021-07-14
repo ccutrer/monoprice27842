@@ -5,6 +5,8 @@ require 'monoprice27842'
 require 'homie-mqtt'
 
 class MQTTBridge
+  REFRESH_INTERVAL = 2
+
   def initialize(mqtt_uri, matrix, device_id: 'monoprice27842', base_topic: 'homie')
     @matrix = matrix
     matrix.item_updated_proc = method(:item_updated)
@@ -98,8 +100,16 @@ class MQTTBridge
 
     @homie.publish
 
+    last_checked_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     loop do
-      matrix.read_messages
+      # check link status every 5s
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      if now - last_checked_at > REFRESH_INTERVAL
+        matrix.refresh
+        last_checked_at = now
+        next
+      end
+      matrix.read_messages(wait: REFRESH_INTERVAL - (now - last_checked_at))
     end
   end
 
