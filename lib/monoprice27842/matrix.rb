@@ -326,14 +326,14 @@ module Monoprice27842
       when 'IN   1  2  3  4  5  6  7  8'
       when /^LINK ((?:Y|N)(?:  (?:Y|N)){7})$/
         $1.split('  ').each_with_index do |link, i|
-          obj = inputs[i - 1]
+          obj = inputs[i]
           obj.update_link(link == 'Y')
           item_updated_proc&.call(obj, :link)
         end
       when 'OUT  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15 16'
       when /^LINK ((?:Y|N)(?:  (?:Y|N)){15})$/
         $1.split('  ').each_with_index do |link, i|
-          obj = find_hdmi_output(i)
+          obj = find_hdmi_output(i + 1)
           obj.update_link(link == 'Y')
           item_updated_proc&.call(obj, :link)
         end
