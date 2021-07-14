@@ -42,6 +42,8 @@ module Monoprice27842
       @ir_outputs = (1..8).map { |id| IROutput.new(id, self) }
       @presets = (1..8).map { |id| Preset.new(id, self) }
       @mutex = Mutex.new
+      @message_queue = {}
+      @write_queue = []
 
       # empty any trash recently sent
       @io.readbyte while @io.ready?
@@ -119,6 +121,12 @@ module Monoprice27842
 
           break unless @io.ready?
         end
+
+        unless @write_queue.empty?
+          write(@write_queue.shift)
+          count += read_messages
+        end
+
         count
       end
     end
@@ -157,6 +165,14 @@ module Monoprice27842
       raise ArgumentError unless [true, false].include?(value)
       raise ArgumentError unless (0..16).include?(output)
 
+      if output != 0 && !power
+        hdmi = find_hdmi_output(output)
+        @message_queue[[hdmi, :power=]] = value
+        hdmi.update_power(value)
+        item_updated_proc&.call(hdmi, :power)
+        return
+      end
+
       write(format('%sOUT%02d.', value ? '@' : '$', output))
     end
 
@@ -170,6 +186,14 @@ module Monoprice27842
     def hdbt_output_input(value, output: 0)
       raise ArgumentError unless (1..8).include?(value)
       raise ArgumentError unless (0..8).include?(output)
+
+      if output != 0 && !power
+        hdmi = find_hdmi_output(output)
+        @message_queue[[hdmi, :input=]] = value
+        hdmi.update_input(value)
+        item_updated_proc&.call(hdmi, :input)
+        return
+      end
 
       write(format('OUT%02d:%02d.', output, value))
     end
@@ -248,6 +272,12 @@ module Monoprice27842
           puts "dropping #{message.inspect}"
           return
         end
+
+        if @in_read
+          @write_queue << message
+          return
+        end
+
         puts "writing #{message.inspect}"
         @io.write(message)
       end
@@ -285,6 +315,15 @@ module Monoprice27842
       when /^Power (ON|OFF)!$/
         @power = $1 == 'ON'
         item_updated_proc&.call(self, :power)
+        if power
+          @in_read = true
+          # need to process pending messages
+          @message_queue.each do |((object, property), value)|
+            object.send(property, value)
+          end
+          @message_queue.clear
+          @in_read = false
+        end
       when /^HDBT Power (ON|OFF)!$/
         @hdbt_poc = $1 == 'ON'
         item_updated_proc&.call(self, :hdbt_poc)
