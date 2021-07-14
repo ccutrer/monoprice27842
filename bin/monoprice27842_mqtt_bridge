@@ -124,6 +124,8 @@ class MQTTBridge
                 end
     node = @homie[node_name]
     property = node[attribute.to_s.gsub('_', '-')]
+    return unless property
+
     property.value = object.send(attribute)
   end
 end
